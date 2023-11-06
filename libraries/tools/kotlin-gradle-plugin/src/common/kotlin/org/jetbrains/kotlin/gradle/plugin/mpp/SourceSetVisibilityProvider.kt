@@ -7,15 +7,16 @@ package org.jetbrains.kotlin.gradle.plugin.mpp
 
 import org.gradle.api.Project
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
-import org.jetbrains.kotlin.gradle.dsl.multiplatformExtensionOrNull
-import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
-import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
-import org.jetbrains.kotlin.gradle.plugin.extraProperties
-import org.jetbrains.kotlin.gradle.plugin.mpp.SourceSetVisibilityProvider.PlatformCompilationData
+import org.gradle.api.attributes.AttributeContainer
+import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.Usage
+import org.jetbrains.kotlin.gradle.dsl.multiplatformExtension
+import org.jetbrains.kotlin.gradle.plugin.*
+import org.jetbrains.kotlin.gradle.plugin.sources.internal
 import org.jetbrains.kotlin.gradle.utils.LazyResolvedConfiguration
 import org.jetbrains.kotlin.gradle.utils.dependencyArtifactsOrNull
-import org.jetbrains.kotlin.gradle.utils.getOrPut
 import java.io.File
+import java.util.*
 
 private typealias KotlinSourceSetName = String
 
@@ -32,44 +33,18 @@ internal data class SourceSetVisibilityResult(
     val hostSpecificMetadataArtifactBySourceSet: Map<String, File>
 )
 
-private val Project.allPlatformCompilationData: List<PlatformCompilationData>
-    get() = extraProperties
-    .getOrPut("all${PlatformCompilationData::class.java.simpleName}") { collectAllPlatformCompilationData() }
-
-private fun Project.collectAllPlatformCompilationData(): List<PlatformCompilationData> {
-    val multiplatformExtension = multiplatformExtensionOrNull ?: return emptyList()
-    return multiplatformExtension
-        .targets
-        .filter { it.platformType != KotlinPlatformType.common }
-        .flatMap { target -> target.compilations.map { it.toPlatformCompilationData() } }
+fun <T : Any> AttributeContainer.setAttributeWithValue(attributeWithValue: AttributeWithValue<T>) {
+    attribute(attributeWithValue.attribute, attributeWithValue.value)
 }
 
-private fun KotlinCompilation<*>.toPlatformCompilationData() = PlatformCompilationData(
-    allSourceSets = allKotlinSourceSets.map { it.name }.toSet(),
-    resolvedDependenciesConfiguration = LazyResolvedConfiguration(internal.configurations.compileDependencyConfiguration),
-    hostSpecificMetadataConfiguration = internal
-        .configurations
-        .hostSpecificMetadataConfiguration
-        ?.let(::LazyResolvedConfiguration)
-)
-
 internal class SourceSetVisibilityProvider(
-    private val platformCompilations: List<PlatformCompilationData>,
+    private val project: Project
 ) {
-    constructor(project: Project) : this(
-        platformCompilations = project.allPlatformCompilationData
-    )
-
-    class PlatformCompilationData(
-        val allSourceSets: Set<KotlinSourceSetName>,
-        val resolvedDependenciesConfiguration: LazyResolvedConfiguration,
-        val hostSpecificMetadataConfiguration: LazyResolvedConfiguration?
-    )
 
     /**
-     * Determine which source sets of the [resolvedRootMppDependency] are visible in the [visibleFromSourceSet] source set.
+     * Determine which source sets of the [resolvedRootMppDependency] are visible in the [thisSourceSet] source set.
      *
-     * This requires resolving dependencies of the compilations which [visibleFromSourceSet] takes part in, in order to find which variants the
+     * This requires resolving dependencies of the compilations which [thisSourceSet] takes part in, in order to find which variants the
      * [resolvedRootMppDependency] got resolved to for those compilations.
      *
      * Once the variants are known, they are checked against the [dependencyProjectStructureMetadata], and the
@@ -79,52 +54,47 @@ internal class SourceSetVisibilityProvider(
      * the Gradle API for dependency variants behaves differently for project dependencies and published ones.
      */
     fun getVisibleSourceSets(
-        visibleFromSourceSet: KotlinSourceSetName,
+        visibleFromName: KotlinSourceSetName,
         resolvedRootMppDependency: ResolvedDependencyResult,
         dependencyProjectStructureMetadata: KotlinProjectStructureMetadata,
         resolvedToOtherProject: Boolean
     ): SourceSetVisibilityResult {
-        val resolvedRootMppDependencyId = resolvedRootMppDependency.selected.id
+        val visibleFrom = project.multiplatformExtension.sourceSets.getByName(visibleFromName)
 
-        val platformCompilationsByResolvedVariantName = mutableMapOf<String, PlatformCompilationData>()
+        val dependencyCoordinate = resolvedRootMppDependency.selected.moduleVersion!!
+        val unresolvedDependency = visibleFrom.internal.resolvableMetadataConfiguration.allDependencies.first {
+            it.group == dependencyCoordinate.group && it.name == dependencyCoordinate.name && it.version == dependencyCoordinate.version
+        }
 
-        val visiblePlatformVariantNames: Set<String?> = platformCompilations
-            .filter { visibleFromSourceSet in it.allSourceSets }
-            .map { platformCompilationData ->
-                val resolvedPlatformDependency = platformCompilationData
-                    .resolvedDependenciesConfiguration
-                    .allResolvedDependencies
-                    .find { it.selected.id == resolvedRootMppDependencyId }
-                /*
-                Returning null if we can't find the given dependency in a certain platform compilations dependencies.
-                This is not expected, since this means the dependency does not support the given targets which will
-                lead to a dependency resolution error.
-
-                Esoteric cases can still get into this branch: e.g. broken publications (or broken .m2 and mavenLocal()).
-                In this case we just return null, effectively ignoring this situation for this algorithm.
-
-                Ignoring this will still lead to a more graceful behaviour in the IDE.
-                A broken publication will potentially lead to 'too many' source sets being visible, which is
-                more desirable than having none.
-                 */ ?: return@map null
-
-                val resolvedVariant = kotlinVariantNameFromPublishedVariantName(
-                    resolvedPlatformDependency.resolvedVariant.displayName
-                )
-
-                if (resolvedVariant !in platformCompilationsByResolvedVariantName) {
-                    platformCompilationsByResolvedVariantName[resolvedVariant] = platformCompilationData
+        val tempPlatformConfigurations = visibleFrom.platforms
+            .map { platform ->
+                project.configurations.create(UUID.randomUUID().toString()).apply {
+                    attributes.apply {
+                        attribute(Category.CATEGORY_ATTRIBUTE, project.categoryByName(Category.LIBRARY))
+                        attribute(Usage.USAGE_ATTRIBUTE, KotlinUsages.consumerApiUsage(project, platform.platformType))
+                        platform.platformAttributes.forEach { attributeWithValue ->
+                            setAttributeWithValue(attributeWithValue)
+                        }
+                    }
+                    dependencies.add(unresolvedDependency)
                 }
+            }
 
-                resolvedVariant
-            }.toSet()
+        val platformConfigurationsByResolvedPlatformDependency = tempPlatformConfigurations
+            .map { LazyResolvedConfiguration(it) }
+            .associateBy { configuration ->
+                configuration.allResolvedDependencies.find { it.selected.id == resolvedRootMppDependency.selected.id }
+                    ?: throw configuration.resolutionFailures.first()
+            }
 
-        if (visiblePlatformVariantNames.isEmpty()) {
-            return SourceSetVisibilityResult(emptySet(), emptyMap())
+        val resolvedPlatformDependenciesByResolvedVariantName = platformConfigurationsByResolvedPlatformDependency.keys.associateBy {
+            kotlinVariantNameFromPublishedVariantName(
+                it.resolvedVariant.displayName
+            )
         }
 
         val visibleSourceSetNames = dependencyProjectStructureMetadata.sourceSetNamesByVariantName
-            .filterKeys { it in visiblePlatformVariantNames }
+            .filterKeys { it in resolvedPlatformDependenciesByResolvedVariantName }
             .values.let { if (it.isEmpty()) emptySet() else it.reduce { acc, item -> acc intersect item } }
 
         val hostSpecificArtifactBySourceSet: Map<String, File> =
@@ -145,25 +115,17 @@ internal class SourceSetVisibilityProvider(
                  *  - we have resolved it for some compilation
                  */
                 val someVariantByHostSpecificSourceSet =
-                    hostSpecificSourceSets.associate { sourceSetName ->
-                        sourceSetName to dependencyProjectStructureMetadata.sourceSetNamesByVariantName
-                            .filterKeys { it in platformCompilationsByResolvedVariantName }
+                    hostSpecificSourceSets.associateWith { sourceSetName ->
+                        dependencyProjectStructureMetadata.sourceSetNamesByVariantName
+                            .filterKeys { it in resolvedPlatformDependenciesByResolvedVariantName }
                             .filterValues { sourceSetName in it }
                             .keys.first()
                     }
 
-                someVariantByHostSpecificSourceSet.entries.mapNotNull { (sourceSetName, variantName) ->
-                    val resolvedHostSpecificMetadataConfiguration = platformCompilationsByResolvedVariantName
-                        .getValue(variantName)
-                        .hostSpecificMetadataConfiguration
-                        ?: return@mapNotNull null
-
-                    val dependency = resolvedHostSpecificMetadataConfiguration
-                        .allResolvedDependencies
-                        .find { it.selected.id == resolvedRootMppDependencyId }
-                        ?: return@mapNotNull null
-
-                    val metadataArtifact = resolvedHostSpecificMetadataConfiguration
+                someVariantByHostSpecificSourceSet.mapNotNull { (sourceSetName, variantName) ->
+                    val dependency = resolvedPlatformDependenciesByResolvedVariantName.getValue(variantName)
+                    val platformConfiguration = platformConfigurationsByResolvedPlatformDependency.getValue(dependency)
+                    val metadataArtifact = platformConfiguration
                         // it can happen that related host-specific metadata artifact doesn't exist
                         // for example on linux machines, then just gracefully return null
                         .dependencyArtifactsOrNull(dependency)
@@ -173,6 +135,8 @@ internal class SourceSetVisibilityProvider(
                     sourceSetName to metadataArtifact.file
                 }.toMap()
             }
+
+        tempPlatformConfigurations.forEach { project.configurations.remove(it) }
 
         return SourceSetVisibilityResult(
             visibleSourceSetNames,

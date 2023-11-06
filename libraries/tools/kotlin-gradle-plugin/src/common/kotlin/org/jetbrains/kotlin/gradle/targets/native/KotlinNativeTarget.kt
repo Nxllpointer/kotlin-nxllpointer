@@ -14,12 +14,18 @@ import org.gradle.api.attributes.Attribute
 import org.gradle.api.plugins.BasePlugin
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
-import org.jetbrains.kotlin.gradle.dsl.*
+import org.jetbrains.kotlin.gradle.dsl.KotlinNativeBinaryContainer
+import org.jetbrains.kotlin.gradle.dsl.KotlinNativeCompilerOptions
+import org.jetbrains.kotlin.gradle.dsl.KotlinNativeCompilerOptionsDefault
+import org.jetbrains.kotlin.gradle.dsl.kotlinExtension
 import org.jetbrains.kotlin.gradle.plugin.*
 import org.jetbrains.kotlin.gradle.plugin.mpp.pm20.*
 import org.jetbrains.kotlin.gradle.plugin.sources.awaitPlatformCompilations
 import org.jetbrains.kotlin.gradle.plugin.sources.internal
-import org.jetbrains.kotlin.gradle.targets.metadata.*
+import org.jetbrains.kotlin.gradle.targets.metadata.filesWithUnpackedArchives
+import org.jetbrains.kotlin.gradle.targets.metadata.findMetadataCompilation
+import org.jetbrains.kotlin.gradle.targets.metadata.isKotlinGranularMetadataEnabled
+import org.jetbrains.kotlin.gradle.targets.metadata.isNativeSourceSet
 import org.jetbrains.kotlin.gradle.targets.native.KotlinNativeBinaryTestRun
 import org.jetbrains.kotlin.gradle.targets.native.KotlinNativeHostTestRun
 import org.jetbrains.kotlin.gradle.targets.native.KotlinNativeSimulatorTestRun
@@ -42,6 +48,8 @@ abstract class KotlinNativeTarget @Inject constructor(
     project,
     KotlinPlatformType.native
 ) {
+
+    override val platform: KotlinPlatform = KotlinPlatforms.Native(konanTarget)
 
     init {
         attributes.attribute(konanTargetAttribute, konanTarget.name)

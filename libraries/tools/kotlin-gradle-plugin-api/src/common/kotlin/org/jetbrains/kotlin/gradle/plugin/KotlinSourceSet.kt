@@ -38,6 +38,10 @@ interface KotlinSourceSet : Named, HasProject, HasMutableExtras, HasKotlinDepend
     @Deprecated(message = "KT-55230: RuntimeOnly scope is not supported for metadata dependency transformation")
     val runtimeOnlyMetadataConfigurationName: String
 
+    fun addPlatforms(vararg platforms: KotlinPlatform)
+
+    val platforms: Set<KotlinPlatform>
+
     companion object {
         const val COMMON_MAIN_SOURCE_SET_NAME = "commonMain"
         const val COMMON_TEST_SOURCE_SET_NAME = "commonTest"

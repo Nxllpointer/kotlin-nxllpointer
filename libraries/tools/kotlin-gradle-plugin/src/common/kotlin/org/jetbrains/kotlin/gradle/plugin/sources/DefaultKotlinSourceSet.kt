@@ -13,7 +13,6 @@ import org.gradle.api.file.SourceDirectorySet
 import org.jetbrains.kotlin.build.DEFAULT_KOTLIN_SOURCE_FILES_EXTENSIONS
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.*
-import org.jetbrains.kotlin.gradle.plugin.launchInStage
 import org.jetbrains.kotlin.gradle.plugin.mpp.*
 import org.jetbrains.kotlin.gradle.utils.*
 import org.jetbrains.kotlin.tooling.core.MutableExtras
@@ -98,6 +97,14 @@ abstract class DefaultKotlinSourceSet @Inject constructor(
             defaultSourceSetLanguageSettingsChecker.runAllChecks(this@DefaultKotlinSourceSet, other)
         }
     }
+
+    private val explicitlyAddedPlatforms = mutableListOf<KotlinPlatform>()
+
+    override fun addPlatforms(vararg platforms: KotlinPlatform) {
+        explicitlyAddedPlatforms += platforms
+    }
+
+    override val platforms: Set<KotlinPlatform> get() = compilations.mapNotNull { it.target.platform }.toSet() + explicitlyAddedPlatforms
 
     override fun toString(): String = "source set $name"
 

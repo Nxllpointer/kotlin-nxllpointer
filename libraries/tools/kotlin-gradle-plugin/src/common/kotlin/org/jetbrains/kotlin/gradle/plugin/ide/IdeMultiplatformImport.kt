@@ -20,8 +20,12 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.*
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 import org.jetbrains.kotlin.gradle.plugin.KotlinTarget
 import org.jetbrains.kotlin.gradle.plugin.extraProperties
+import org.jetbrains.kotlin.gradle.plugin.ide.IdeMultiplatformImport.Priority.Companion.high
+import org.jetbrains.kotlin.gradle.plugin.ide.IdeMultiplatformImport.Priority.Companion.low
+import org.jetbrains.kotlin.gradle.plugin.ide.IdeMultiplatformImport.Priority.Companion.normal
+import org.jetbrains.kotlin.gradle.plugin.ide.IdeMultiplatformImport.Priority.Companion.veryHigh
 import org.jetbrains.kotlin.gradle.plugin.ide.IdeMultiplatformImport.SourceSetConstraint
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinPlatforms
 import org.jetbrains.kotlin.gradle.plugin.sources.internal
 import org.jetbrains.kotlin.gradle.targets.metadata.isNativeSourceSet
 import org.jetbrains.kotlin.gradle.targets.metadata.isSingleKotlinTargetSourceSet
@@ -267,9 +271,7 @@ interface IdeMultiplatformImport {
              * Only matches SourceSets that share code between at least two native targets, but no non-native target
              */
             val isSharedNative = isNative and SourceSetConstraint { sourceSet ->
-                sourceSet.internal.compilations.filterIsInstance<KotlinNativeCompilation>()
-                    .map { compilation -> compilation.konanTarget }
-                    .toSet().size > 1
+                sourceSet.platforms.count { it is KotlinPlatforms.Native } > 1
             }
 
             /**

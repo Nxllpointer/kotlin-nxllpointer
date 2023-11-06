@@ -75,8 +75,11 @@ class IdeBinaryDependencyResolver @JvmOverloads constructor(
          */
         @ExternalKotlinTargetApi
         class Compilation @JvmOverloads constructor(
-            internal val compilationSelector: (KotlinSourceSet) -> KotlinCompilation<*>? =
-                { sourceSet -> sourceSet.internal.compilations.singleOrNull { it.platformType != KotlinPlatformType.common } },
+            internal val compilationSelector: (KotlinSourceSet) -> KotlinCompilation<*>? = { sourceSet ->
+                sourceSet.internal.compilations
+                    .singleOrNull { it.platformType != KotlinPlatformType.common }
+                    ?.takeIf { it.target.platform == sourceSet.platforms.singleOrNull() }
+            },
             override val setupArtifactViewAttributes: AttributeContainer.(sourceSet: KotlinSourceSet) -> Unit = {},
             override val componentFilter: ((ComponentIdentifier) -> Boolean)? = null,
             override val dependencyFilter: ((Dependency) -> Boolean)? = null,
